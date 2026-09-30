@@ -1,0 +1,54 @@
+{
+  "project": {
+    "name": "",
+    "client": "",
+    "owner": "",
+    "timezone": "Pacific/Guadalcanal",
+    "summary": "",
+    "startDate": null,
+    "targetDate": null
+  },
+  "status": {
+    "overall": null,
+    "headline": ""
+  },
+  "milestones": [],
+  "report": {
+    "windowDays": 14,
+    "highlights": [],
+    "next": [],
+    "risks": [],
+    "decisions": []
+  },
+  "schedule": {
+    "defaultDays": 7,
+    "dates": {}
+  },
+  "codebase": {
+    "overview": "",
+    "stack": [],
+    "architecture": [],
+    "modules": [],
+    "setup": [],
+    "conventions": [],
+    "docs": [],
+    "glossary": []
+  },
+  "dependencyOverrides": {
+    "add": [],
+    "remove": []
+  },
+  "exclude": {
+    "labels": [
+      "duplicate",
+      "invalid",
+      "question",
+      "wontfix"
+    ],
+    "issues": []
+  },
+  "publish": {
+    "devTrackerUrl": null,
+    "reportUrl": null
+  }
+}

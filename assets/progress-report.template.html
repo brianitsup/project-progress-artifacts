@@ -1,0 +1,146 @@
+<title>__TITLE__</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/*__THEME_CSS__*/
+.headline { font-size: 1.08rem; max-width: 72ch; }
+.trend { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.risk-impact { font: 600 0.72rem var(--f-mono); text-transform: uppercase; letter-spacing: 0.06em; }
+.risk-impact.high { color: var(--st-blocked); } .risk-impact.medium { color: var(--st-ready); } .risk-impact.low { color: var(--muted); }
+</style>
+
+<main class="sheet">
+  <header class="titleblock">
+    <div>
+      <div class="eyebrow">Progress report · Sheet B of 2</div>
+      <h1 id="p-name"></h1>
+      <p class="lede headline" id="p-head"></p>
+    </div>
+    <div class="tb-cells" id="tb"></div>
+  </header>
+
+  <section aria-labelledby="h-sum">
+    <div class="section-head"><h2 id="h-sum">Summary</h2><p id="sum-note"></p></div>
+    <div class="metrics" id="metrics"></div>
+  </section>
+
+  <section aria-labelledby="h-ms">
+    <div class="section-head"><h2 id="h-ms">Milestones</h2><p>In the order they are delivered.</p></div>
+    <div class="panel ms-list" id="ms"></div>
+  </section>
+
+  <section aria-labelledby="h-tl" id="timeline-sec">
+    <div class="section-head"><h2 id="h-tl">Timeline</h2><p id="tl-note">Arrows link unfinished work to the work that must finish before it can start. Select a milestone to expand or collapse it.</p></div>
+    <div class="legend" id="tl-legend"></div>
+    <div id="timeline"></div>
+  </section>
+
+  <section aria-labelledby="h-news">
+    <div class="section-head"><h2 id="h-news">Recent progress and what comes next</h2></div>
+    <div class="cols" id="news"></div>
+  </section>
+
+  <section aria-labelledby="h-risk" id="risk-sec">
+    <div class="section-head"><h2 id="h-risk">Risks and decisions</h2></div>
+    <div id="risks" style="display:grid;gap:14px"></div>
+  </section>
+
+  <footer class="foot" id="foot"></footer>
+</main>
+
+<script>
+/*__COMMON_JS__*/
+const M = "__MODEL_JSON__";
+(() => {
+  const { esc, chip, fmtDate, bar, spark } = PP;
+  const P = M.project, S = M.stats, tz = P.timezone;
+  const $ = (id) => document.getElementById(id);
+  const MS = M.milestones.filter((m) => m.clientVisible && m.total > 0);
+
+  $("p-name").textContent = P.name;
+  $("p-head").textContent = M.status.headline || P.summary || "";
+  const cells = [["Client", esc(P.client || "—")], ["Report date", esc(fmtDate(M.generatedAt, tz))],
+    ["Target date", esc(P.targetDate ? fmtDate(P.targetDate, tz) : "—")], ["Overall status", M.status.overall ? chip(M.status.overall) : "—"]];
+  $("tb").innerHTML = cells.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("");
+
+  const msDone = MS.filter((m) => m.health === "complete").length;
+  const lateMs = MS.filter((m) => m.health === "late" || m.health === "at_risk").length;
+  const highRisks = ((M.report || {}).risks || []).filter((r) => /high/i.test(r.impact || "")).length;
+  const attention = lateMs + highRisks + (S.overdue || 0) + (S.conflicts || 0);
+  const sp = spark(M.history);
+  $("metrics").innerHTML = `
+    <div class="metric"><span class="k">Work complete</span><span class="v num">${S.pct}<small>%</small></span>${bar(S.done, S.in_progress, 0, S.total)}<span class="k num">${S.done} of ${S.total} work items</span></div>
+    <div class="metric"><span class="k">Milestones complete</span><span class="v num">${msDone}<small> / ${MS.length}</small></span><span class="k">${MS.length - msDone ? `${MS.length - msDone} remaining` : "All milestones delivered"}</span></div>
+    <div class="metric"><span class="k">Finished in the last ${S.windowDays} days</span><span class="v num">${S.closedInWindow}</span><span class="k">Work items closed</span></div>
+    <div class="metric"><span class="k">Needs attention</span><span class="v num">${attention}</span><span class="k">${attention ? [lateMs ? `${lateMs} milestone(s) late or at risk` : "", highRisks ? `${highRisks} high-impact risk(s)` : "", S.overdue ? `${S.overdue} overdue` : "", S.conflicts ? `${S.conflicts} schedule conflict(s)` : ""].filter(Boolean).join(" · ") : "Nothing flagged"}</span></div>
+    ${sp ? `<div class="metric"><span class="k">Completion trend</span>${sp}<span class="k">${esc(fmtDate(M.history[0].date, tz))} to today</span></div>` : ""}`;
+  $("sum-note").textContent = `As of ${M.asOf}`;
+
+  $("ms").innerHTML = MS.length ? MS.map((m, i) => `
+    <div class="ms ${m.health}">
+      <div class="step num" aria-hidden="true">${m.health === "complete" ? "✓" : i + 1}</div>
+      <div class="body"><div class="row" style="display:flex;gap:10px;flex-wrap:wrap;align-items:baseline"><h3>${esc(m.name)}</h3>${chip(m.health)}</div>
+        ${m.description ? `<p class="muted" style="font-size:.9rem">${esc(m.description)}</p>` : ""}</div>
+      <div class="right">${bar(m.done, m.inProgress, 0, m.total)}
+        <div class="row"><span class="num">${m.pct}% · ${m.done}/${m.total} items</span><span>${m.due ? "Due " + esc(fmtDate(m.due, tz)) : "No due date"}</span></div></div>
+    </div>`).join("") : `<p class="empty">No milestones have been defined yet.</p>`;
+
+  // timeline: milestones as collapsible groups, tasks as bars, finish-to-start arrows
+  const keys = new Set(MS.map((m) => m.key));
+  const tasks = M.issues.filter((i) => keys.has(i.milestone || "—") && i.status !== "dropped" && i.schedule && i.schedule.start);
+  const title = new Map(M.issues.map((i) => [i.n, i.title]));
+  const range = (a, b) => (a === b ? fmtDate(a, tz) : `${fmtDate(a, tz, { day: "numeric", month: "short" })} – ${fmtDate(b, tz)}`);
+  const tip = (i) => {
+    const sc = i.schedule, lines = [`<b>${esc(i.title)}</b>${esc(PP.STATUS[i.status])}`];
+    lines.push(sc.kind === "actual" ? `Worked ${esc(range(sc.start, sc.end))}` : sc.kind === "planned" ? `Planned ${esc(range(sc.start, sc.end))}` : `Estimated ${esc(range(sc.start, sc.end))}, no due date set`);
+    if (sc.due) lines.push(`Due ${esc(fmtDate(sc.due, tz))}${sc.overdue ? ' <span class="bad">· overdue</span>' : ""}`);
+    if (i.openBlockers.length) lines.push(`Waiting on: ${i.openBlockers.map((n) => esc(title.get(n))).join("; ")}`);
+    if (sc.conflicts.length) lines.push(`<span class="bad">Due before its prerequisite finishes: ${sc.conflicts.map((n) => esc(title.get(n))).join("; ")}</span>`);
+    return lines.join("<br>");
+  };
+  const rows = [];
+  MS.forEach((m) => {
+    const ts = tasks.filter((i) => (i.milestone || "—") === m.key).sort((a, b) => a.schedule.start.localeCompare(b.schedule.start) || a.stage - b.stage || a.n - b.n);
+    if (!ts.length) return;
+    rows.push({ type: "group", key: m.key, label: m.name, start: m.start, end: m.end, due: m.due, collapsed: m.health === "complete" && MS.length > 1, sub: `${m.done}/${m.total}` });
+    ts.forEach((i) => rows.push({ type: "task", id: i.n, group: m.key, label: i.title, start: i.schedule.start, end: i.schedule.end, due: i.schedule.due,
+      status: i.status, kind: i.schedule.kind, overdue: i.schedule.overdue, conflicts: i.schedule.conflicts, tip: tip(i) }));
+  });
+  const tn = new Set(tasks.map((i) => i.n));
+  const deps = M.edges.filter((e) => tn.has(e.from) && tn.has(e.to)).map((e) => ({ from: e.from, to: e.to }));
+  if (!rows.length) $("timeline-sec").hidden = true;
+  else {
+    const kinds = new Set(tasks.map((i) => i.schedule.kind));
+    $("tl-legend").innerHTML = ["done", "in_progress", "ready", "blocked"].filter((st) => tasks.some((i) => i.status === st)).map((st) => chip(st)).join("") +
+      (kinds.has("estimated") ? `<span><i class="sw"></i>Estimated, no due date yet</span>` : "") +
+      (tasks.some((i) => i.schedule.due) || MS.some((m) => m.due) ? `<span><i class="dia"></i>Due date</span>` : "") +
+      (deps.some((e) => M.issues.find((i) => i.n === e.from).status !== "done" && M.issues.find((i) => i.n === e.to).status !== "done") ? `<span><i class="line"></i>Must finish first</span>` : "") +
+      (S.conflicts ? `<span><i class="line bad"></i>Schedule conflict</span>` : "") + `<span><i class="line today"></i>Today</span>`;
+    PP.gantt($("timeline"), rows, deps, { today: M.today, tz, scrollToToday: true, aria: `Timeline of ${tasks.length} work items` });
+    if (S.open && S.openDated < S.open) $("tl-note").textContent += ` ${S.open - S.openDated} open item(s) have no due date yet; their bars are estimates.`;
+  }
+
+  // news
+  const R = M.report || {};
+  const list = (items) => `<ul class="items">${items.join("")}</ul>`;
+  const done = (R.highlights || []).map((h) => `<li>${esc(h)}</li>`);
+  M.recentDone.slice(0, 8).forEach((i) => done.push(`<li><div class="row"><span>${esc(i.title)}</span></div><div class="sub">Completed ${esc(fmtDate(i.closedAt, tz))}${i.milestone ? " · " + esc(i.milestone) : ""}</div></li>`));
+  let next = (R.next || []).map((h) => `<li>${esc(h)}</li>`);
+  const rank = { in_progress: 0, ready: 1 };
+  if (!next.length) next = M.issues.filter((i) => i.status in rank).sort((a, b) => rank[a.status] - rank[b.status] || a.stage - b.stage || a.n - b.n).slice(0, 6)
+    .map((i) => `<li><div class="row"><span>${esc(i.title)}</span>${chip(i.status)}</div>${i.milestone ? `<div class="sub">${esc(i.milestone)}</div>` : ""}</li>`);
+  $("news").innerHTML = `<div class="panel"><h3>Delivered</h3>${done.length ? list(done) : `<p class="empty">Nothing closed in the last ${S.windowDays} days.</p>`}</div>
+    <div class="panel"><h3>Coming next</h3>${next.length ? list(next) : `<p class="empty">No open work is scheduled.</p>`}</div>`;
+
+  const risks = R.risks || [], dec = R.decisions || [];
+  if (!risks.length && !dec.length) $("risk-sec").hidden = true;
+  else {
+    let h = "";
+    if (risks.length) h += `<div class="table-wrap"><table><thead><tr><th>Risk</th><th>Impact</th><th>What we are doing</th><th>Owner</th></tr></thead><tbody>${risks.map((r) => `<tr><td>${esc(r.risk)}</td><td><span class="risk-impact ${esc((r.impact || "").toLowerCase())}">${esc(r.impact || "—")}</span></td><td>${esc(r.mitigation || "—")}</td><td>${esc(r.owner || "—")}</td></tr>`).join("")}</tbody></table></div>`;
+    if (dec.length) h += `<div class="panel"><h3>Decisions needed</h3><ul class="items">${dec.map((d) => `<li><div class="row"><span>${esc(d.decision || d)}</span></div>${d.by || d.owner ? `<div class="sub">${[d.owner ? "From " + esc(d.owner) : "", d.by ? "Needed by " + esc(fmtDate(d.by, tz)) : ""].filter(Boolean).join(" · ")}</div>` : ""}</li>`).join("")}</ul></div>`;
+    $("risks").innerHTML = h;
+  }
+
+  $("foot").innerHTML = `<span>${esc(P.name)}${P.owner ? " · Prepared by " + esc(P.owner) : ""} · ${esc(M.asOf)}</span><span>Figures are generated from the project's issue tracker.</span>`;
+})();
+</script>

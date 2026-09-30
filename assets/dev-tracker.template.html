@@ -1,0 +1,163 @@
+<title>__TITLE__</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/*__THEME_CSS__*/
+.issue-title { font-weight: 500; }
+.issue-excerpt { color: var(--muted); font-size: 0.82rem; margin-top: 3px; max-width: 60ch; }
+.refs { font-family: var(--f-mono); font-size: 0.8rem; white-space: nowrap; }
+.refs a { margin-right: 4px; }
+</style>
+
+<main class="sheet">
+  <header class="titleblock">
+    <div>
+      <div class="eyebrow">Dev tracker · Sheet A of 2</div>
+      <h1 id="p-name"></h1>
+      <p class="lede" id="p-lede"></p>
+    </div>
+    <div class="tb-cells" id="tb"></div>
+  </header>
+
+  <section aria-labelledby="h-sum">
+    <div class="section-head"><h2 id="h-sum">Where the build stands</h2><p id="sum-note"></p></div>
+    <div class="metrics" id="metrics"></div>
+  </section>
+
+  <div id="warnings"></div>
+
+  <section aria-labelledby="h-flow">
+    <div class="section-head">
+      <h2 id="h-flow">Issue flow in dependency order</h2>
+      <p>Read left to right. Each stage can start once everything pointing into it is done. Hover an issue to trace its chain; select it to jump to its details.</p>
+    </div>
+    <div class="controls">
+      <label for="f-ms">Milestone <select id="f-ms"></select></label>
+      <button class="btn" id="f-done" type="button" aria-pressed="false">Hide completed</button>
+      <button class="btn" id="f-crit" type="button" aria-pressed="false">Critical path only</button>
+    </div>
+    <div class="legend" id="legend"></div>
+    <div class="flow-wrap" id="flow"></div>
+  </section>
+
+  <section aria-labelledby="h-queue">
+    <div class="section-head"><h2 id="h-queue">Work queue</h2><p>Ready items are sorted by how much work they unblock.</p></div>
+    <div class="cols" id="queue"></div>
+  </section>
+
+  <section aria-labelledby="h-start" id="start-here">
+    <div class="section-head"><h2 id="h-start">Start here: the codebase</h2><p>Orientation for anyone joining the project.</p></div>
+    <div id="codebase" class="cols"></div>
+  </section>
+
+  <section aria-labelledby="h-reg">
+    <div class="section-head"><h2 id="h-reg">Issue register</h2><p>Every tracked issue, in the order it can be worked.</p></div>
+    <div class="table-wrap"><table id="register">
+      <thead><tr><th>Stage</th><th>Issue</th><th>Title</th><th>Status</th><th>Milestone</th><th>Blocked by</th><th>Blocks</th><th>Due</th><th>Criteria</th><th>PRs</th><th>Owner</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </section>
+
+  <footer class="foot" id="foot"></footer>
+</main>
+
+<script>
+/*__COMMON_JS__*/
+const M = "__MODEL_JSON__";
+(() => {
+  const { esc, chip, fmtDate, bar, flow, issueLink, spark } = PP;
+  const P = M.project, S = M.stats, tz = P.timezone, R = P.repoUrl;
+  const byN = new Map(M.issues.map((i) => [i.n, i]));
+  const $ = (id) => document.getElementById(id);
+  const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
+
+  $("p-name").textContent = P.name;
+  $("p-lede").textContent = P.summary || P.repoDescription || "";
+  const cells = [["Repository", `<a href="${esc(R)}" target="_blank" rel="noopener">${esc(P.repo)}</a>`], ["As of", esc(M.asOf)],
+    ["Revision", `R${M.history.length}`], ["Project status", M.status.overall ? chip(M.status.overall) : "—"]];
+  $("tb").innerHTML = cells.map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("");
+
+  const openCrit = M.criticalPath.length;
+  $("metrics").innerHTML = `
+    <div class="metric"><span class="k">Complete</span><span class="v num">${S.pct}<small>%</small></span>${bar(S.done, S.in_progress, S.blocked, S.total)}<span class="k num">${S.done} of ${S.total} issues</span></div>
+    <div class="metric"><span class="k">Ready to start</span><span class="v num">${S.ready}</span><span class="k">No open blockers</span></div>
+    <div class="metric"><span class="k">In progress</span><span class="v num">${S.in_progress}</span><span class="k">Open PR, label or board status</span></div>
+    <div class="metric"><span class="k">Blocked</span><span class="v num">${S.blocked}</span><span class="k">Waiting on unfinished issues</span></div>
+    <div class="metric"><span class="k">Critical path</span><span class="v num">${openCrit}</span><span class="k">${openCrit ? "Issues in the longest open chain" : "No open dependency chain"}</span></div>`;
+  $("sum-note").textContent = `${S.closedInWindow} closed in the last ${S.windowDays} days` + (S.dropped ? ` · ${S.dropped} dropped` : "");
+
+  if (M.warnings.length) $("warnings").innerHTML = `<div class="warn"><b>Data to tidy up</b><ul>${M.warnings.map((w) => `<li>${esc(w)}</li>`).join("")}</ul></div>`;
+
+  // ---- flow ----
+  const msSel = $("f-ms");
+  msSel.innerHTML = `<option value="">All milestones</option>` + M.milestones.map((m) => `<option value="${esc(m.key)}">${esc(m.title)} (${m.done}/${m.total})</option>`).join("");
+  const kinds = new Set(M.edges.map((e) => e.kind));
+  $("legend").innerHTML = ["done", "in_progress", "ready", "blocked"].map((s) => chip(s)).join("") +
+    `<span><i class="line"></i>Blocks</span>` +
+    (kinds.has("sub") ? `<span><i class="line sub"></i>Part of parent</span>` : "") +
+    (kinds.has("inferred") ? `<span><i class="line inferred"></i>Inferred, not yet recorded in GitHub</span>` : "") +
+    (M.criticalPath.length ? `<span><i class="line crit"></i>Critical path</span>` : "");
+  let hideDone = store.get("pp-hide-done") != null ? store.get("pp-hide-done") === "1" : M.issues.length > 40;
+  let critOnly = false;
+  const crit = new Set(M.criticalPath);
+  const critEdge = new Set(M.criticalPath.slice(1).map((n, i) => `${M.criticalPath[i]}>${n}`));
+  function drawFlow() {
+    $("f-done").setAttribute("aria-pressed", hideDone);
+    $("f-crit").setAttribute("aria-pressed", critOnly);
+    const ms = msSel.value;
+    const nodes = M.issues.filter((i) => (!ms || (i.milestone || "—") === ms) && !(hideDone && (i.status === "done" || i.status === "dropped")) && (!critOnly || crit.has(i.n)))
+      .map((i) => ({ id: i.n, stage: i.stage, title: i.title, idText: `#${i.n}`,
+        meta: i.schedule && i.schedule.due && i.status !== "done" ? `due ${fmtDate(i.schedule.due, tz, { day: "numeric", month: "short" })}` : i.criteria.total ? `${i.criteria.done}/${i.criteria.total} AC` : (i.assignees[0] ? "@" + i.assignees[0] : ""),
+        cls: i.status + (i.critical ? " crit" : ""), aria: `Issue ${i.n}: ${i.title}. ${PP.STATUS[i.status]}.` }));
+    const edges = M.edges.map((e) => ({ from: e.from, to: e.to, cls: (e.kind === "inferred" ? "inferred" : e.kind === "sub" ? "sub" : "") + (critEdge.has(`${e.from}>${e.to}`) ? " crit" : "") }));
+    if (!nodes.length) { $("flow").innerHTML = `<p class="empty" style="padding:16px">No issues match these filters.</p>`; return; }
+    flow($("flow"), nodes, edges, { stageLabel: (st) => `Stage ${st + 1}`, onClick: jump, aria: `Dependency flow of ${nodes.length} issues` });
+  }
+  msSel.addEventListener("change", drawFlow);
+  $("f-done").addEventListener("click", () => { hideDone = !hideDone; store.set("pp-hide-done", hideDone ? "1" : "0"); drawFlow(); });
+  $("f-crit").addEventListener("click", () => { critOnly = !critOnly; drawFlow(); });
+  if (!M.criticalPath.length) $("f-crit").hidden = true;
+  function jump(n) {
+    const row = document.getElementById("i-" + n);
+    if (!row) return;
+    row.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+    row.classList.add("flash"); setTimeout(() => row.classList.remove("flash"), 1600);
+  }
+  drawFlow();
+
+  // ---- queue ----
+  const refs = (ns) => ns.map((n) => issueLink(R, n)).join(" ");
+  const li = (i, sub) => `<li><div class="row">${issueLink(R, i.n)}<span class="issue-title">${esc(i.title)}</span></div>${sub ? `<div class="sub">${sub}</div>` : ""}</li>`;
+  const ready = M.issues.filter((i) => i.status === "ready").sort((a, b) => b.unblocksCount - a.unblocksCount || a.stage - b.stage || a.n - b.n);
+  const prog = M.issues.filter((i) => i.status === "in_progress");
+  const blocked = M.issues.filter((i) => i.status === "blocked");
+  const col = (title, items, fn, empty) => `<div class="panel"><h3>${title} <span class="muted num">${items.length}</span></h3><ul class="items">${items.length ? items.map(fn).join("") : `<li class="empty">${empty}</li>`}</ul></div>`;
+  $("queue").innerHTML =
+    col("Ready to start", ready, (i) => li(i, [i.unblocksCount ? `Unblocks ${i.unblocksCount}` : "", i.milestone ? esc(i.milestone) : "", i.critical ? "On critical path" : ""].filter(Boolean).join(" · ")), "Nothing is ready. Check the blocked list.") +
+    col("In progress", prog, (i) => li(i, [i.assignees.length ? i.assignees.map((a) => "@" + esc(a)).join(", ") : "Unassigned", i.prs.filter((p) => p.state === "open").map((p) => `PR <a href="${esc(p.url)}" target="_blank" rel="noopener">#${p.n}</a>`).join(" ")].filter(Boolean).join(" · ")), "Nothing is marked in progress.") +
+    col("Blocked", blocked, (i) => li(i, `Waiting on ${refs(i.openBlockers)}`), "Nothing is blocked.");
+
+  // ---- codebase ----
+  const C = M.codebase || {};
+  const blocks = [];
+  if (C.overview || (C.stack || []).length) blocks.push(`<div class="panel" style="display:grid;gap:12px"><h3>What this is</h3>${C.overview ? `<p>${esc(C.overview)}</p>` : ""}${(C.stack || []).length ? `<div class="tags">${C.stack.map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}${(C.architecture || []).length ? `<ul class="items">${C.architecture.map((a) => `<li>${esc(a)}</li>`).join("")}</ul>` : ""}</div>`);
+  if ((C.setup || []).length) blocks.push(`<div class="panel" style="display:grid;gap:10px"><h3>Run it locally</h3>${C.setup.map((s) => `<div style="display:grid;gap:4px"><span class="sub muted" style="font-size:.84rem">${esc(s.step)}</span>${s.cmd ? `<pre class="cmd">${esc(s.cmd)}</pre>` : ""}</div>`).join("")}</div>`);
+  if ((C.modules || []).length) blocks.push(`<div class="panel" style="grid-column:1/-1;display:grid;gap:10px"><h3>Where things live</h3><div class="table-wrap"><table><thead><tr><th>Path</th><th>Responsibility</th><th>Related issues</th></tr></thead><tbody>${C.modules.map((m) => `<tr><td class="n">${esc(m.path)}</td><td>${esc(m.purpose)}</td><td class="refs">${refs(m.issues || [])}</td></tr>`).join("")}</tbody></table></div></div>`);
+  if ((C.conventions || []).length) blocks.push(`<div class="panel"><h3>Conventions to follow</h3><ul class="items">${C.conventions.map((c) => `<li>${esc(c)}</li>`).join("")}</ul></div>`);
+  if ((C.docs || []).length || (C.glossary || []).length) blocks.push(`<div class="panel" style="display:grid;gap:12px">${(C.docs || []).length ? `<h3>Read next</h3><ul class="items">${C.docs.map((d) => `<li><div class="row"><a href="${esc(d.url || (R + "/blob/HEAD/" + d.path))}" target="_blank" rel="noopener">${esc(d.title)}</a></div>${d.why ? `<div class="sub">${esc(d.why)}</div>` : ""}</li>`).join("")}</ul>` : ""}${(C.glossary || []).length ? `<h3>Glossary</h3><dl class="kv">${C.glossary.map((g) => `<dt>${esc(g.term)}</dt><dd>${esc(g.definition)}</dd>`).join("")}</dl>` : ""}</div>`);
+  $("codebase").innerHTML = blocks.join("") || `<p class="empty">No codebase guide yet. Fill in the codebase section of progress.config.json and rebuild.</p>`;
+
+  // ---- register ----
+  $("register").querySelector("tbody").innerHTML = M.issues.map((i) => `<tr id="i-${i.n}">
+    <td class="num">${i.stage + 1}</td><td class="n">${issueLink(R, i.n)}</td>
+    <td><div class="issue-title">${esc(i.title)}</div>${i.excerpt ? `<div class="issue-excerpt">${esc(i.excerpt)}</div>` : ""}</td>
+    <td>${chip(i.status)}</td><td>${esc(i.milestone || "—")}</td>
+    <td class="refs">${refs(i.blockedBy) || "—"}</td><td class="refs">${refs(i.blocks) || "—"}</td>
+    <td class="num" style="white-space:nowrap">${i.schedule && i.schedule.due ? `<span${i.schedule.overdue || i.schedule.conflicts.length ? ' style="color:var(--st-blocked);font-weight:600"' : ""}>${esc(fmtDate(i.schedule.due, tz))}${i.schedule.overdue ? " · overdue" : ""}</span>` : "—"}</td>
+    <td class="num">${i.criteria.total ? `${i.criteria.done}/${i.criteria.total}` : "—"}</td>
+    <td class="refs">${i.prs.map((p) => `<a href="${esc(p.url)}" target="_blank" rel="noopener" title="${esc(p.title)} (${esc(p.state)})">#${p.n}</a>`).join("") || "—"}</td>
+    <td>${i.assignees.map((a) => "@" + esc(a)).join(", ") || "—"}</td></tr>`).join("");
+
+  $("foot").innerHTML = `<span>Generated from GitHub issues in ${esc(P.repo)} on ${esc(M.asOf)}. Companion sheet: progress-report.html.</span><span>Regenerate with the project-progress-artifacts skill; edit narrative in docs/progress/progress.config.json.</span>`;
+})();
+</script>
