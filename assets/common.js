@@ -68,7 +68,7 @@ const PP = (() => {
     const place = (list, desired) => {
       list.sort((a, b) => desired(a) - desired(b) || a.id - b.id);
       let next = TOP;
-      list.forEach((n) => { const d = Math.max(desired(n), next); y.set(n.id, d); next = d + H + GY; });
+      list.forEach((n) => { const want = desired(n); const d = want >= 1e6 ? next : Math.max(want, next); y.set(n.id, d); next = d + H + GY; });
     };
     cols.forEach((list, ci) => {
       if (ci === 0) { let k = TOP; list.forEach((n) => { y.set(n.id, k); k += H + GY; }); return; }

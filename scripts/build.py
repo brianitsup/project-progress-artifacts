@@ -58,6 +58,17 @@ NUM_RE = re.compile(r"#(\d+)")
 DATE_LINE_RE = re.compile(
     r"^[\s>*_-]*(?P<k>due(?:\s+date)?|target(?:\s+date)?|deadline|end\s+date|start(?:\s+date)?)[*_\s]*[:：][*_\s]*(?P<d>\d{4}-\d{2}-\d{2})",
     re.I | re.M)
+SECTION_RE = re.compile(
+    r"(?im)^#{1,6}\s*(depends on|dependencies|blocked by|prerequisites|blocks|unblocks)\b[^\n]*\n((?:[ \t]*(?:[-*]|\d+\.)[^\n]*\n?|[ \t]*\n)*)")
+NON_ISSUE_REF_RE = re.compile(r"(?i)\b(build[- ]plan|pr|pull request|step|phase|wave|gate|q)\s*#\d+")
+
+
+def strip_refs(text):
+    """Drop '#N' references that are not issue numbers (build-plan #3, PR #24, ...)."""
+    return NON_ISSUE_REF_RE.sub("", text)
+
+
+SIZE_RE = re.compile(r"(?im)^[\s>*_-]*(?:size|estimate)[*_\s]*[:：][*_\s]*(XS|S|M|L|XL|\d+(?:\.\d+)?\s*h)\b")
 MENTION_RE = re.compile(r"[^\n]{0,70}#(\d+)\b[^\n]{0,40}")
 
 
@@ -131,7 +142,9 @@ def build_model(raw, cfg, history):
             dates["start" if m.group("k").lower().startswith("start") else "due"] = m.group("d")
         dates.update({k: v for k, v in (cfg.get("schedule", {}).get("dates", {}).get(str(it["number"])) or {}).items()
                       if k in ("start", "due") and v})
+        sm = SIZE_RE.search(body)
         issues[it["number"]] = {
+            "size": sm.group(1).upper().replace(" ", "") if sm else None,
             "dates": dates,
             "prStarts": [p["createdAt"] for p in ((it.get("closedByPullRequestsReferences") or {}).get("nodes") or []) if p.get("createdAt")],
             "n": it["number"], "title": it["title"].strip(), "url": it["url"],
@@ -182,10 +195,33 @@ def build_model(raw, cfg, history):
         if (r.get("parent") or {}).get("number"):
             add(n, r["parent"]["number"], "sub")
         body = iss["_body"]
-        for m in DEP_RE.finditer(body):
+        clean_body = strip_refs(body)
+        for m in DEP_RE.finditer(clean_body):
             for num in NUM_RE.findall(m.group(1)):
                 add(int(num), n, "text")
-        for m in BLOCKS_RE.finditer(body):
+        # Markdown sections: "## Depends on" / "## Blocked by" / "## Blocks" followed by bullet lines.
+        for sec in SECTION_RE.finditer(body):
+            head = sec.group(1).lower()
+            for line in sec.group(2).splitlines():
+                l = line.strip().lstrip("-*0123456789. ").lower()
+                if re.match(r"(not )?blocked by|depends on|requires|after|needs", l):
+                    if l.startswith("not "):
+                        continue
+                    outgoing = False
+                elif re.match(r"(blocks|unblocks|required by|feeds)", l):
+                    outgoing = True
+                elif head in ("blocks", "unblocks"):
+                    outgoing = True
+                elif head == "dependencies":
+                    continue  # unlabelled line under a mixed section: prose, not a dependency
+                else:
+                    outgoing = head in ("blocks", "unblocks")
+                for num in NUM_RE.findall(strip_refs(line)):
+                    if outgoing:
+                        add(n, int(num), "text")
+                    else:
+                        add(int(num), n, "text")
+        for m in BLOCKS_RE.finditer(clean_body):
             for num in NUM_RE.findall(m.group(1)):
                 add(n, int(num), "text")
         for _, num in TASK_REF_RE.findall(body):
@@ -243,10 +279,21 @@ def build_model(raw, cfg, history):
     for n, iss in issues.items():
         if iss["status"]:
             continue
-        open_blockers = [b for b in blocked_by[n] if issues[b]["status"] not in ("done", "dropped")]
+        # A blocker whose code is already merged (issue left open for sign-off) no longer holds work back.
+        so = cfg.get("statusOverrides", {})
+        merged = lambda b: any(p["state"] == "merged" for p in issues[b]["prs"]) or \
+            (so.get(str(b)) or {}).get("merged", False)
+        open_blockers = [b for b in blocked_by[n] if issues[b]["status"] not in ("done", "dropped") and not merged(b)]
         signals = [iss["projectStatus"] or ""] + iss["labels"]
         has_open_pr = any(p["state"] == "open" for p in iss["prs"])
-        started = has_open_pr or any(IN_PROGRESS_RE.search(s) for s in signals if s)
+        iss["merged"] = merged(n)
+        started = has_open_pr or iss["merged"] or any(IN_PROGRESS_RE.search(s) for s in signals if s)
+        forced = (so.get(str(n)) or {}).get("status")
+        if forced in ("in_progress", "ready", "blocked"):
+            iss["status"] = forced
+            iss["openBlockers"] = open_blockers
+            iss["note"] = (so.get(str(n)) or {}).get("note")
+            continue
         if open_blockers and not started:
             iss["status"] = "blocked"
         elif started:
@@ -338,7 +385,9 @@ def build_model(raw, cfg, history):
             "order": len(milestones),
         })
     # dependency order: milestones sorted by due date, then by earliest stage
-    milestones.sort(key=lambda m: (m["key"] == "—", m["due"] or "9999", m["order"]))
+    # Delivery order: the order milestones were defined in (GitHub milestones come by due date,
+    # then config phases in the order written), with unscheduled work last.
+    milestones.sort(key=lambda m: (m["key"] == "—", m["order"]))
     ms_index = {m["key"]: i for i, m in enumerate(milestones)}
     ms_edges = set()
     for (a, b) in edges:
@@ -445,7 +494,7 @@ def build_model(raw, cfg, history):
             "blockedBy": sorted(blocked_by[n]), "blocks": sorted(blocks[n]),
             "openBlockers": sorted(i.get("openBlockers", [])), "prs": i["prs"], "criteria": i["criteria"],
             "excerpt": i["excerpt"], "createdAt": i["createdAt"], "closedAt": i["closedAt"],
-            "projectStatus": i["projectStatus"], "critical": n in crit,
+            "projectStatus": i["projectStatus"], "critical": n in crit, "merged": bool(i.get("merged")), "size": i.get("size"), "note": i.get("note") or (cfg.get("statusOverrides", {}).get(str(n)) or {}).get("note"),
             "unblocksCount": len(descendants(n, blocks)),
             "schedule": {k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in sched[n].items()},
         })
@@ -464,6 +513,7 @@ def build_model(raw, cfg, history):
         "today": today.isoformat(),
         "project": p,
         "status": derive_status(cfg.get("status", {}), milestones),
+        "publish": cfg.get("publish", {}),
         "codebase": cfg.get("codebase", {}),
         "report": cfg.get("report", {}),
         "stats": stats,
@@ -514,9 +564,11 @@ def render(template_name, model, fragment):
         common = f.read()
     with open(os.path.join(ASSETS, template_name)) as f:
         tpl = f.read()
+    # Existing published pages keep their names: project.titles overrides the defaults.
+    t = model["project"].get("titles") or {}
     title = {
-        "dev-tracker.template.html": f"{model['project']['name']} Dev Tracker",
-        "progress-report.template.html": f"{model['project']['name']} Progress Report",
+        "dev-tracker.template.html": t.get("devTracker") or f"{model['project']['name']} Dev Tracker",
+        "progress-report.template.html": t.get("report") or f"{model['project']['name']} Progress Report",
     }[template_name]
     data = json.dumps(model, ensure_ascii=False).replace("</", "<\\/")
     body = (tpl.replace("/*__THEME_CSS__*/", css)

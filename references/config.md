@@ -88,3 +88,19 @@ Aim for what a competent developer new to the repo needs in their first hour.
 ## publish
 
 `devTrackerUrl`, `reportUrl`: the claude.ai artifact URLs, filled after the first publish.
+
+## statusOverrides
+
+```json
+"statusOverrides": { "12": { "status": "in_progress", "merged": true, "note": "Merged in PR #66; open for sign-off" } }
+```
+
+For facts GitHub can't express: code merged by a PR that doesn't close the issue, an issue being worked without a label or PR. `merged: true` also unblocks the issue's dependants. The note shows in the Dev Tracker register. Remove overrides once GitHub reflects the state (close the issue, add a label, or link the PR with "Closes #n").
+
+## project.titles
+
+`{ "devTracker": "...", "report": "..." }` keeps a page's old name when it is republished at the same link. Use only when the user asks; the default is the standard naming.
+
+## report.taskLabels
+
+`{ "39": "Editor guide for TCSI staff" }` — plain-language names for open work items on the Progress Report timeline, for client audiences where GitHub titles are technical. When `report.highlights` is filled, the "Delivered" list shows only those highlights, not raw closed-issue titles.

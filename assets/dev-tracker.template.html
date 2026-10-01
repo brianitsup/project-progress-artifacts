@@ -150,7 +150,7 @@ const M = "__MODEL_JSON__";
   // ---- register ----
   $("register").querySelector("tbody").innerHTML = M.issues.map((i) => `<tr id="i-${i.n}">
     <td class="num">${i.stage + 1}</td><td class="n">${issueLink(R, i.n)}</td>
-    <td><div class="issue-title">${esc(i.title)}</div>${i.excerpt ? `<div class="issue-excerpt">${esc(i.excerpt)}</div>` : ""}</td>
+    <td><div class="issue-title">${esc(i.title)}</div>${i.note ? `<div class="issue-excerpt"><b>Status note:</b> ${esc(i.note)}</div>` : ""}${i.excerpt ? `<div class="issue-excerpt">${esc(i.excerpt)}</div>` : ""}</td>
     <td>${chip(i.status)}</td><td>${esc(i.milestone || "—")}</td>
     <td class="refs">${refs(i.blockedBy) || "—"}</td><td class="refs">${refs(i.blocks) || "—"}</td>
     <td class="num" style="white-space:nowrap">${i.schedule && i.schedule.due ? `<span${i.schedule.overdue || i.schedule.conflicts.length ? ' style="color:var(--st-blocked);font-weight:600"' : ""}>${esc(fmtDate(i.schedule.due, tz))}${i.schedule.overdue ? " · overdue" : ""}</span>` : "—"}</td>

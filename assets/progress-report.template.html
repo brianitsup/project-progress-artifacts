@@ -30,7 +30,7 @@
   </section>
 
   <section aria-labelledby="h-tl" id="timeline-sec">
-    <div class="section-head"><h2 id="h-tl">Timeline</h2><p id="tl-note">Arrows link unfinished work to the work that must finish before it can start. Select a milestone to expand or collapse it.</p></div>
+    <div class="section-head"><h2 id="h-tl">Timeline</h2><p id="tl-note">Each grey bar spans a milestone from first work to last. Coloured bars are the work still to do; arrows show what must finish before the next piece can start.</p></div>
     <div class="legend" id="tl-legend"></div>
     <div id="timeline"></div>
   </section>
@@ -56,6 +56,7 @@ const M = "__MODEL_JSON__";
   const P = M.project, S = M.stats, tz = P.timezone;
   const $ = (id) => document.getElementById(id);
   const MS = M.milestones.filter((m) => m.clientVisible && m.total > 0);
+  const R = M.report || {};
 
   $("p-name").textContent = P.name;
   $("p-head").textContent = M.status.headline || P.summary || "";
@@ -87,23 +88,24 @@ const M = "__MODEL_JSON__";
 
   // timeline: milestones as collapsible groups, tasks as bars, finish-to-start arrows
   const keys = new Set(MS.map((m) => m.key));
-  const tasks = M.issues.filter((i) => keys.has(i.milestone || "—") && i.status !== "dropped" && i.schedule && i.schedule.start);
+  // Readers of this sheet need what is left and what it waits on; finished work is summarised by each milestone bar.
+  const tasks = M.issues.filter((i) => keys.has(i.milestone || "—") && i.status !== "dropped" && i.status !== "done" && i.schedule && i.schedule.start);
   const title = new Map(M.issues.map((i) => [i.n, i.title]));
   const range = (a, b) => (a === b ? fmtDate(a, tz) : `${fmtDate(a, tz, { day: "numeric", month: "short" })} – ${fmtDate(b, tz)}`);
   const tip = (i) => {
-    const sc = i.schedule, lines = [`<b>${esc(i.title)}</b>${esc(PP.STATUS[i.status])}`];
+    const sc = i.schedule, lines = [`<b>${esc((R.taskLabels || {})[i.n] || i.title)}</b>${esc(PP.STATUS[i.status])}`];
     lines.push(sc.kind === "actual" ? `Worked ${esc(range(sc.start, sc.end))}` : sc.kind === "planned" ? `Planned ${esc(range(sc.start, sc.end))}` : `Estimated ${esc(range(sc.start, sc.end))}, no due date set`);
     if (sc.due) lines.push(`Due ${esc(fmtDate(sc.due, tz))}${sc.overdue ? ' <span class="bad">· overdue</span>' : ""}`);
-    if (i.openBlockers.length) lines.push(`Waiting on: ${i.openBlockers.map((n) => esc(title.get(n))).join("; ")}`);
+    if (i.openBlockers.length) lines.push(`Waiting on: ${i.openBlockers.map((n) => esc((R.taskLabels || {})[n] || title.get(n))).join("; ")}`);
     if (sc.conflicts.length) lines.push(`<span class="bad">Due before its prerequisite finishes: ${sc.conflicts.map((n) => esc(title.get(n))).join("; ")}</span>`);
     return lines.join("<br>");
   };
   const rows = [];
   MS.forEach((m) => {
     const ts = tasks.filter((i) => (i.milestone || "—") === m.key).sort((a, b) => a.schedule.start.localeCompare(b.schedule.start) || a.stage - b.stage || a.n - b.n);
-    if (!ts.length) return;
-    rows.push({ type: "group", key: m.key, label: m.name, start: m.start, end: m.end, due: m.due, collapsed: m.health === "complete" && MS.length > 1, sub: `${m.done}/${m.total}` });
-    ts.forEach((i) => rows.push({ type: "task", id: i.n, group: m.key, label: i.title, start: i.schedule.start, end: i.schedule.end, due: i.schedule.due,
+    rows.push({ type: "group", key: m.key, label: m.name, start: m.start, end: m.end, due: m.due, collapsed: false, sub: m.health === "complete" ? "Done" : `${m.done}/${m.total}` });
+    const LBL = (R.taskLabels || {});
+    ts.forEach((i) => rows.push({ type: "task", id: i.n, group: m.key, label: LBL[i.n] || i.title, start: i.schedule.start, end: i.schedule.end, due: i.schedule.due,
       status: i.status, kind: i.schedule.kind, overdue: i.schedule.overdue, conflicts: i.schedule.conflicts, tip: tip(i) }));
   });
   const tn = new Set(tasks.map((i) => i.n));
@@ -121,10 +123,9 @@ const M = "__MODEL_JSON__";
   }
 
   // news
-  const R = M.report || {};
   const list = (items) => `<ul class="items">${items.join("")}</ul>`;
   const done = (R.highlights || []).map((h) => `<li>${esc(h)}</li>`);
-  M.recentDone.slice(0, 8).forEach((i) => done.push(`<li><div class="row"><span>${esc(i.title)}</span></div><div class="sub">Completed ${esc(fmtDate(i.closedAt, tz))}${i.milestone ? " · " + esc(i.milestone) : ""}</div></li>`));
+  if (!(R.highlights || []).length) M.recentDone.slice(0, 8).forEach((i) => done.push(`<li><div class="row"><span>${esc(i.title)}</span></div><div class="sub">Completed ${esc(fmtDate(i.closedAt, tz))}${i.milestone ? " · " + esc(i.milestone) : ""}</div></li>`));
   let next = (R.next || []).map((h) => `<li>${esc(h)}</li>`);
   const rank = { in_progress: 0, ready: 1 };
   if (!next.length) next = M.issues.filter((i) => i.status in rank).sort((a, b) => rank[a.status] - rank[b.status] || a.stage - b.stage || a.n - b.n).slice(0, 6)

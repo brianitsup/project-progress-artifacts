@@ -67,17 +67,23 @@ def gql(query, variables):
             raise RuntimeError(p.stderr.strip() or p.stdout.strip())
         data = json.loads(p.stdout)
     else:
+        # No gh: use a token if one is set; otherwise rely on an authenticating proxy
+        # (e.g. a hosted session with GitHub repository access) and fail clearly if there is none.
         token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-        if not token:
-            sys.exit("No `gh` CLI and no GITHUB_TOKEN/GH_TOKEN set. Install gh and run `gh auth login`, or export a token.")
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"bearer {token}"
         req = urllib.request.Request(
             "https://api.github.com/graphql",
-            data=json.dumps({"query": query, "variables": variables}).encode(),
-            headers={"Authorization": f"bearer {token}", "Content-Type": "application/json"})
+            data=json.dumps({"query": query, "variables": variables}).encode(), headers=headers)
         try:
             data = json.loads(urllib.request.urlopen(req, timeout=60).read())
         except urllib.error.HTTPError as e:
-            raise RuntimeError(f"HTTP {e.code}: {e.read().decode()[:500]}")
+            msg = e.read().decode()[:500]
+            if e.code in (401, 403) and not token:
+                sys.exit(f"GitHub refused the request ({e.code}). Log in with `gh auth login`, set GITHUB_TOKEN, "
+                         f"or give this session GitHub access to the repository. Details: {msg}")
+            raise RuntimeError(f"HTTP {e.code}: {msg}")
     if data.get("errors"):
         raise RuntimeError(json.dumps(data["errors"])[:800])
     return data["data"]
