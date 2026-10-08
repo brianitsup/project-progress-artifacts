@@ -1,6 +1,6 @@
 ---
 name: project-progress-artifacts
-description: Generate or refresh a project's two progress artifacts from its GitHub issues — a detailed Dev Tracker (issue flow chart in dependency order, work queue, codebase onboarding guide, issue register) and a high-level Progress Report for clients, managers and supervisors (milestones, % complete, delivered/next, risks) — in one uniform house style, saved to docs/progress/ and published as shareable pages. Use whenever the user asks for a progress report, status update, dev tracker, issue dependency chart/flowchart, roadmap view, milestone tracking, client update, onboarding overview of a repo, or to "update the tracker/report" for any dev project, even if they don't name both artifacts.
+description: "Use for any of Brian's dev projects (a repo with GitHub issues) whenever the user asks for a progress report, status update, client/manager update, dev tracker, issue dependency chart or flowchart, Gantt/timeline, roadmap view, milestone tracking, onboarding overview, or to \"update the tracker/report\", even if they name only one of the two artifacts. Takes precedence over stakeholder-update and roadmap-update for repo-based projects. Generates or refreshes the Dev Tracker and Progress Report from GitHub issues in the house style, in docs/progress/, published as shareable pages."
 ---
 
 # Project progress artifacts
